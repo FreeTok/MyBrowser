@@ -1,0 +1,29 @@
+{
+  "source_consumed_locally": true,
+  "credential_values_emitted": false,
+  "protocol": "http",
+  "checks": [
+    {
+      "ok": true
+    },
+    {
+      "ok": true
+    },
+    {
+      "ok": true
+    }
+  ],
+  "baseline": {
+    "ok": true
+  },
+  "ip_changed": true,
+  "same_ip_three_connections": true,
+  "geo_lookup": {
+    "ok": true
+  },
+  "geo": {
+    "country_code": "IT",
+    "timezone": "Europe/Rome"
+  },
+  "geo_ip_matches_probe": true
+}

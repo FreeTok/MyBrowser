@@ -1,0 +1,209 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+
+env:
+  BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL: ${{ vars.BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL }}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate tag
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z, got: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+      - name: Verify BrowseForge Chromium runtime assets
+        run: scripts/check-browseforge-chromium-assets.sh
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Test
+        run: go test -count=1 -timeout 5m $(go list ./... | grep -v '/internal/spike$')
+
+      - name: Vet
+        run: go vet ./...
+
+  build:
+    needs: verify
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            suffix: linux-x64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - os: ubuntu-latest
+            goos: darwin
+            goarch: amd64
+            suffix: macos-x64
+          - os: ubuntu-latest
+            goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+          - os: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            suffix: windows-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Generate fingerprint pool
+        run: |
+          npm install --silent
+          node scripts/generate-fingerprints.js --browser firefox --os windows --count 500
+          node scripts/generate-fingerprints.js --browser firefox --os macos --count 500
+          node scripts/generate-fingerprints.js --browser chrome --os windows --count 500
+          node scripts/generate-fingerprints.js --browser chrome --os macos --count 500
+          pip install camoufox --quiet
+          python scripts/inject-webgl.py
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          BINARY=BrowseForge
+          if [ "${{ matrix.goos }}" = "windows" ]; then BINARY=BrowseForge.exe; fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o $BINARY ./cmd/server
+
+      - name: Package
+        run: |
+          DIR=BrowseForge-lite
+          mkdir -p $DIR/data $DIR/profiles $DIR/logs $DIR/examples
+
+          BINARY=BrowseForge
+          if [ "${{ matrix.goos }}" = "windows" ]; then BINARY=BrowseForge.exe; fi
+
+          cp $BINARY $DIR/
+          cp -r extension/ $DIR/extension/
+          cp -r data/fingerprints-*.json $DIR/data/
+          cp -r examples/* $DIR/examples/ 2>/dev/null || true
+          cp config.default.json $DIR/config.json
+          cp README.md README.zh-TW.md API.md API.zh-TW.md $DIR/
+
+          ZIPNAME=BrowseForge-${GITHUB_REF_NAME}-lite-${{ matrix.suffix }}.zip
+          zip -r $ZIPNAME $DIR/
+          echo "ZIPNAME=$ZIPNAME" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: BrowseForge-${{ matrix.suffix }}
+          path: ${{ env.ZIPNAME }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Verify release assets
+        run: |
+          set -euo pipefail
+          expected=(
+            "linux-x64"
+            "linux-arm64"
+            "macos-x64"
+            "macos-arm64"
+            "windows-x64"
+          )
+
+          for suffix in "${expected[@]}"; do
+            file="artifacts/BrowseForge-${suffix}/BrowseForge-${GITHUB_REF_NAME}-lite-${suffix}.zip"
+            if [[ ! -s "$file" ]]; then
+              echo "Missing release asset: $file" >&2
+              find artifacts -maxdepth 3 -type f >&2
+              exit 1
+            fi
+          done
+
+          count="$(find artifacts -type f -name '*.zip' | wc -l | tr -d ' ')"
+          if [[ "$count" != "${#expected[@]}" ]]; then
+            echo "Expected ${#expected[@]} zip assets, found $count" >&2
+            find artifacts -type f -name '*.zip' >&2
+            exit 1
+          fi
+
+          tmp="$(mktemp -d)"
+          unzip -q "artifacts/BrowseForge-linux-x64/BrowseForge-${GITHUB_REF_NAME}-lite-linux-x64.zip" -d "$tmp"
+          chmod +x "$tmp/BrowseForge-lite/BrowseForge"
+          "$tmp/BrowseForge-lite/BrowseForge" doctor | grep "BrowseForge ${GITHUB_REF_NAME#v}"
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Verify BrowseForge Chromium runtime assets
+        run: scripts/check-browseforge-chromium-assets.sh
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: docker
+          file: docker/Dockerfile.run
+          push: true
+          build-args: |
+            BROWSEFORGE_VERSION=${{ github.ref_name }}
+            BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL=${{ env.BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/browseforge:latest
+            ghcr.io/${{ github.repository_owner }}/browseforge:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}

@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "profiles": [
+    {
+      "name": "Профиль 1",
+      "runtime_id": "browseforge-chromium",
+      "group": "Локальные профили",
+      "proxy_required": false
+    },
+    {
+      "name": "Профиль 4",
+      "runtime_id": "browseforge-chromium",
+      "group": "Локальные профили",
+      "proxy_required": false
+    },
+    {
+      "name": "Firefox 3",
+      "runtime_id": "camoufox",
+      "group": "Firefox профили",
+      "rendering": {
+        "schema": 1,
+        "backend": "llvmpipe-msaa8"
+      },
+      "native_policy": {
+        "schema": 1,
+        "webrtc": "proxy_only"
+      },
+      "proxy_required": true
+    },
+    {
+      "name": "Firefox 1",
+      "runtime_id": "camoufox",
+      "group": "Firefox профили",
+      "rendering": {
+        "schema": 1,
+        "backend": "hardware"
+      },
+      "native_policy": {
+        "schema": 1,
+        "webrtc": "proxy_only"
+      },
+      "proxy_required": true
+    },
+    {
+      "name": "Профиль 3",
+      "runtime_id": "browseforge-chromium",
+      "group": "Локальные профили",
+      "proxy_required": false
+    },
+    {
+      "name": "Firefox 2",
+      "runtime_id": "camoufox",
+      "group": "Firefox профили",
+      "rendering": {
+        "schema": 1,
+        "backend": "llvmpipe"
+      },
+      "proxy_required": false
+    },
+    {
+      "name": "Профиль 2",
+      "runtime_id": "browseforge-chromium",
+      "group": "Локальные профили",
+      "proxy_required": false
+    },
+    {
+      "name": "Firefox 4",
+      "runtime_id": "camoufox",
+      "group": "Firefox профили",
+      "rendering": {
+        "schema": 1,
+        "backend": "softpipe"
+      },
+      "proxy_required": false
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "curl": [
+    "exit_1",
+    "exit_1",
+    "exit_1"
+  ],
+  "browsers": {
+    "prof_4adcd9d57661": [
+      "exit_1",
+      "exit_1",
+      "exit_1"
+    ],
+    "prof_3e787ccac49f": [
+      "exit_1",
+      "exit_1",
+      "exit_1"
+    ]
+  },
+  "all_connections_same_ip": true,
+  "unique_exits": 1
+}

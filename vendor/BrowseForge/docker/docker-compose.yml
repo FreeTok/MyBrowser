@@ -1,0 +1,27 @@
+services:
+  browseforge:
+    build:
+      context: .
+      dockerfile: Dockerfile.run
+      args:
+        BROWSEFORGE_VERSION: ${BROWSEFORGE_VERSION:-v2.1.15}
+        BROWSEFORGE_PREINSTALL_BROWSERS: ${BROWSEFORGE_PREINSTALL_BROWSERS:-1}
+        BROWSEFORGE_PREINSTALL_RUNTIMES: ${BROWSEFORGE_PREINSTALL_RUNTIMES:-camoufox,browseforge-chromium}
+        BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL: ${BROWSEFORGE_CHROMIUM_RELEASE_BASE_URL:-}
+    ports:
+      - "19280:19280"  # Dashboard + REST API
+      - "6901:6901"    # KasmVNC web client
+    volumes:
+      - ./browseforge/profiles:/app/profiles
+      - ./browseforge/data:/app/data
+      - ./browseforge/browsers:/app/browsers
+      - ./browseforge/logs:/app/logs
+      - ./browseforge/backups:/app/backups
+    environment:
+      - VNC_PASSWORD=${VNC_PASSWORD:-browseforge}
+      - BROWSEFORGE_SEED_BROWSERS=${BROWSEFORGE_SEED_BROWSERS:-1}
+      - BROWSEFORGE_PUBLIC_BASE_URL=${BROWSEFORGE_PUBLIC_BASE_URL:-http://localhost:19280}
+      - BROWSEFORGE_DOCKER_GPU_MODE=${BROWSEFORGE_DOCKER_GPU_MODE:-software}
+      - BROWSEFORGE_DOCKER_DISPLAY_WIDTH=${BROWSEFORGE_DOCKER_DISPLAY_WIDTH:-1920}
+      - BROWSEFORGE_DOCKER_DISPLAY_HEIGHT=${BROWSEFORGE_DOCKER_DISPLAY_HEIGHT:-1080}
+    restart: unless-stopped

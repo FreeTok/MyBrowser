@@ -1,0 +1,19 @@
+--- a/internal/browser/socks5relay.go
++++ b/internal/browser/socks5relay.go
+@@ -6,6 +6,7 @@
+ 	"io"
+ 	"log/slog"
+ 	"net"
++	"strconv"
+ 	"sync"
+ 
+ 	"golang.org/x/net/proxy"
+@@ -111,7 +112,7 @@
+ 		if _, err := io.ReadFull(conn, buf[:dlen+2]); err != nil {
+ 			return
+ 		}
+-		target = fmt.Sprintf("%s:%d", string(buf[:dlen]), binary.BigEndian.Uint16(buf[dlen:dlen+2]))
++		target = net.JoinHostPort(string(buf[:dlen]), strconv.Itoa(int(binary.BigEndian.Uint16(buf[dlen:dlen+2]))))
+ 	case 0x04: // IPv6
+ 		if _, err := io.ReadFull(conn, buf[:18]); err != nil {
+ 			return

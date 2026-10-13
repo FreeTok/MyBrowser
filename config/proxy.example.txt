@@ -1,0 +1,1 @@
+proxy.example.invalid:8080:YOUR_USERNAME:YOUR_PASSWORD

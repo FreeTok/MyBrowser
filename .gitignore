@@ -1,0 +1,31 @@
+# Generated runtime and private browser state never belong in Git.
+/.runtime/
+/.venv/
+/build/
+/downloads/
+/secrets/
+/profiles/
+/data/
+/logs/
+/browsers/
+/config.json
+/relay-config.json
+**/.api-token
+**/browser-data/
+**/profile.json
+**/*-before/
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+!*.example
+TestProxy*
+Test Proxy*
+*.log
+*.zip
+*.tar.gz
+*.sqlite*
+*.db
+*.pem
+*.key
+*.har

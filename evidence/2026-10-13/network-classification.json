@@ -1,0 +1,15 @@
+{
+  "pixelscan_network": {
+    "timezone": "Europe/Rome",
+    "user_type": "hosting",
+    "classification": {
+      "isAnonymous": false,
+      "isAnonymousProxy": false,
+      "isAnonymousVpn": false,
+      "isCrawler": false,
+      "isHostingProvider": true,
+      "isPublicProxy": true,
+      "isTorExitNode": false
+    }
+  }
+}

@@ -1,0 +1,110 @@
+#!/usr/bin/python3
+"""Desktop manager, profile presets and private proxy configuration."""
+import argparse
+import json
+import os
+import re
+import runpy
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
+from common import HOME, REPO, desktop_env, load_proxy, private_json
+
+
+def bridge():
+    result = runpy.run_path(str(REPO / 'bin/mybrowser-mcp'), run_name='mybrowser_bridge')
+    result['ensure_service']()
+    return result
+
+
+def seed_profiles():
+    mcp = bridge()
+    existing = {p['name']: p for p in (mcp['call']('list_profiles') or [])}
+    config = json.loads((HOME / 'config.json').read_text())
+    presets = json.loads((REPO / 'config/profiles.example.json').read_text())['profiles']
+    for preset in presets:
+        runtime = preset['runtime_id']
+        if not config['runtimes'].get(runtime, {}).get('enabled'):
+            continue
+        if preset['name'] in existing:
+            continue
+        created = mcp['call']('create_profile', name=preset['name'], runtime_id=runtime,
+                              group=preset.get('group', 'MyBrowser'))
+        match = re.search(r'Created profile (prof_[a-z0-9]+)', created)
+        if not match:
+            raise RuntimeError('Unrecognized profile creation result')
+        pid = match.group(1)
+        native = HOME / 'profiles' / pid / 'browser-data/CamoufoxNative'
+        for key, name in [('rendering', 'rendering.json'), ('native_policy', 'native-policy.json')]:
+            if key in preset:
+                private_json(native / name, preset[key])
+        print('Created: ' + preset['name'])
+
+
+def set_proxy(args):
+    proxy = load_proxy(args.file)
+    mcp = bridge()
+    # Require known, closed profiles before changing credentials or bridge target.
+    profiles = {p['id']: p for p in (mcp['call']('list_profiles') or [])}
+    if any(pid not in profiles or profiles[pid].get('runtime_id') != 'camoufox' for pid in args.profiles):
+        raise ValueError('Select existing Camoufox profiles')
+    sessions = mcp['browser_sessions']()
+    if sessions:
+        raise ValueError('Close MyBrowser browsers before changing the shared proxy target')
+    secret = HOME / 'secrets/http-proxy.txt'
+    secret.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    content = Path(args.file).read_bytes()
+    fd = os.open(secret, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(content)
+    secret.chmod(0o600)
+    if args.direct:
+        relay = json.loads((HOME / 'relay-config.json').read_text())
+        subprocess.run(['systemctl', '--user', 'restart', 'mybrowser-proxy-direct.service'],
+                       env=desktop_env(), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proxy['host'], proxy['port'] = '127.0.0.1', relay['port']
+    for pid in args.profiles:
+        mcp['call']('update_profile', profile_id=pid, proxy=proxy)
+        profile = HOME / 'profiles' / pid
+        profile.chmod(0o700)
+        (profile / 'profile.json').chmod(0o600)
+        private_json(profile / 'browser-data/CamoufoxNative/native-policy.json',
+                     {'schema': 1, 'webrtc': 'proxy_only'})
+    print('Proxy configured privately for ' + str(len(args.profiles)) + ' profiles')
+
+
+def main():
+    parser = argparse.ArgumentParser(description='MyBrowser local browser manager')
+    sub = parser.add_subparsers(dest='command', required=True)
+    for name in ['open', 'start', 'stop', 'status', 'seed-profiles']:
+        sub.add_parser(name)
+    proxy = sub.add_parser('set-proxy')
+    proxy.add_argument('--file', required=True, help='Local file; never pass credentials as arguments')
+    proxy.add_argument('--direct', action='store_true', help='Use physical interface instead of VPN')
+    proxy.add_argument('profiles', nargs='+', help='Closed Camoufox profile IDs')
+    args = parser.parse_args()
+    if args.command == 'seed-profiles':
+        seed_profiles()
+    elif args.command == 'set-proxy':
+        set_proxy(args)
+    elif args.command == 'open':
+        bridge()
+        subprocess.run([str(HOME / 'BrowseForge'), '--base-dir', str(HOME), 'open'],
+                       env=desktop_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    elif args.command == 'start':
+        bridge()
+        print('MyBrowser ready')
+    else:
+        subprocess.run(['systemctl', '--user', args.command, 'mybrowser.service'],
+                       env=desktop_env(), check=True)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as error:
+        # Proxy parser/network errors can include secrets; never echo raw errors.
+        print('MyBrowser command failed (' + type(error).__name__ + ')', file=sys.stderr)
+        raise SystemExit(1)

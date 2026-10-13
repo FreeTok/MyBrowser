@@ -1,0 +1,126 @@
+#!/usr/bin/python3
+"""MCP stdio bridge; one authenticated manager, no token in client config."""
+import argparse
+import json
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'scripts'))
+from common import HOME, desktop_env
+
+SESSION = None
+
+
+def base_url():
+    config = json.loads((HOME / 'config.json').read_text())
+    return 'http://127.0.0.1:' + str(config['port'])
+
+
+def ready():
+    try:
+        with urllib.request.urlopen(base_url() + '/api/status', timeout=2) as response:
+            return json.load(response).get('version') == '2.1.15'
+    except (OSError, ValueError):
+        return False
+
+
+def ensure_service():
+    if ready():
+        return
+    subprocess.run(['systemctl', '--user', 'start', 'mybrowser.service'], env=desktop_env(),
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if ready():
+            return
+        time.sleep(0.2)
+    raise RuntimeError('MyBrowser service did not become ready')
+
+
+def forward(message):
+    global SESSION
+    token = (HOME / 'data/.api-token').read_text().strip()
+    headers = {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream',
+               'Authorization': f'Bearer {token}'}
+    if SESSION:
+        headers['Mcp-Session-Id'] = SESSION
+    request = urllib.request.Request(base_url() + '/mcp', data=json.dumps(message).encode(), headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            SESSION = response.headers.get('Mcp-Session-Id', SESSION)
+            raw = response.read().decode()
+            if not raw.strip():
+                return None
+            if 'text/event-stream' in response.headers.get('Content-Type', ''):
+                for line in raw.splitlines():
+                    if line.startswith('data:'):
+                        payload = json.loads(line[5:].strip())
+                        if payload.get('id') == message.get('id'):
+                            return payload
+                return None
+            return json.loads(raw)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f'MyBrowser HTTP {error.code}') from None
+
+
+def browser_sessions():
+    token = (HOME / 'data/.api-token').read_text().strip()
+    request = urllib.request.Request(base_url() + '/api/sessions',
+                                     headers={'Authorization': 'Bearer ' + token})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.load(response).get('data') or []
+
+
+def call(tool, **arguments):
+    response = forward({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call',
+                        'params': {'name': tool, 'arguments': arguments}})
+    if not response or response.get('error') or response.get('result', {}).get('isError'):
+        raise RuntimeError('MyBrowser MCP tool failed: ' + tool)
+    content = '\n'.join(c['text'] for c in response['result']['content'] if c.get('type') == 'text')
+    try:
+        return json.loads(content)
+    except ValueError:
+        # BrowseForge prefixes several results with a human-readable summary.
+        if '\n' in content:
+            try:
+                return json.loads(content.split('\n', 1)[1])
+            except ValueError:
+                pass
+        for marker in ['[', '{']:
+            position = content.find(marker)
+            if position >= 0:
+                try:
+                    return json.loads(content[position:])
+                except ValueError:
+                    pass
+        return content
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--call')
+    parser.add_argument('--arguments', default='{}')
+    args = parser.parse_args()
+    ensure_service()
+    if args.call:
+        print(json.dumps(call(args.call, **json.loads(args.arguments)), ensure_ascii=False))
+        return
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        message = json.loads(line)
+        try:
+            response = forward(message)
+        except Exception:
+            response = {'jsonrpc': '2.0', 'id': message.get('id'),
+                        'error': {'code': -32603, 'message': 'MyBrowser transport failure'}}
+        if 'id' in message and response is not None:
+            print(json.dumps(response, ensure_ascii=False), flush=True)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,16 @@
+#!/usr/bin/python3
+"""Preserve desktop X11 authentication omitted by BrowseForge 2.1.15."""
+import os
+from pathlib import Path
+
+runtime_dir = Path(f"/run/user/{os.getuid()}")
+authorities = list(runtime_dir.glob(".mutter-Xwaylandauth.*"))
+if authorities:
+    authority = max(authorities, key=lambda path: path.stat().st_mtime)
+    os.environ["XAUTHORITY"] = str(authority)
+os.environ.setdefault("XDG_RUNTIME_DIR", str(runtime_dir))
+profile = next((arg.split('=', 1)[1] for arg in os.sys.argv[1:] if arg.startswith('--user-data-dir=')), None)
+if profile is None:
+    raise SystemExit('Chromium persistent profile path is required')
+binary = str(Path(profile).resolve().parent.parent.parent / 'browsers/browseforge-chromium/chrome')
+os.execv(binary, [binary, *os.sys.argv[1:]])

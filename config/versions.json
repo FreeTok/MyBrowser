@@ -1,0 +1,13 @@
+{
+  "manager": {
+    "version": "2.1.15",
+    "source": "https://github.com/nczz/BrowseForge/releases/tag/v2.1.15",
+    "archive_sha256": "682a7dc3b73cce5ec2c70e1623b6d0fde16539a5208c05d868428c10ab8e4c5a"
+  },
+  "camoufox": {
+    "version": "v156.0.1-beta.36",
+    "url": "https://github.com/daijro/camoufox/releases/download/v156.0.1-beta.36/camoufox-156.0.1-beta.36-lin.x86_64.zip",
+    "sha256": "72637885ee67c93466ad377831c647192f8f08fb5c6fd9279de1320b49dd2b53",
+    "size": 1294875941
+  }
+}

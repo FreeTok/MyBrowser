@@ -1,0 +1,10 @@
+{
+  "listen": "127.0.0.1:19289",
+  "connected": 16,
+  "failed": 0,
+  "active": 4,
+  "vpn_bypass_verified": 16,
+  "bytes_up": 221655,
+  "bytes_down": 287049,
+  "physical_device": "wlp2s0"
+}

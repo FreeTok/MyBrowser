@@ -1,0 +1,40 @@
+{
+  "manager_version": "2.1.15",
+  "public_scan_performed": false,
+  "created_profiles": 8,
+  "seed_idempotent": true,
+  "browsers": [
+    {
+      "name": "Firefox 1",
+      "runtime_id": "camoufox",
+      "typed_and_clicked": true,
+      "platform": "Linux x86_64",
+      "webdriver": false,
+      "persona_stable_after_restart": true,
+      "backend": "hardware"
+    },
+    {
+      "name": "Firefox 3",
+      "runtime_id": "camoufox",
+      "typed_and_clicked": true,
+      "platform": "Linux x86_64",
+      "webdriver": false,
+      "persona_stable_after_restart": true,
+      "backend": "llvmpipe-msaa8"
+    },
+    {
+      "name": "Профиль 1",
+      "runtime_id": "browseforge-chromium",
+      "typed_and_clicked": true,
+      "platform": "Linux x86_64",
+      "webdriver": false
+    }
+  ],
+  "go_packages_tested": 11,
+  "go_tests_passed": true,
+  "python_tests_passed": 4,
+  "repository_check_passed": true,
+  "private_value_scan_passed": true,
+  "runtime_stopped_after_check": true,
+  "original_browseforge_unchanged": true
+}

@@ -1,0 +1,20 @@
+{
+  "prof_4adcd9d57661": {
+    "configured": true,
+    "native": {
+      "timezone": "Europe/Rome",
+      "language": "it-IT",
+      "rtc": "function"
+    },
+    "browser_ip_equals_authenticated_proxy": true
+  },
+  "prof_3e787ccac49f": {
+    "configured": true,
+    "native": {
+      "timezone": "Europe/Rome",
+      "language": "it-IT",
+      "rtc": "function"
+    },
+    "browser_ip_equals_authenticated_proxy": true
+  }
+}

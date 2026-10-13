@@ -1,0 +1,140 @@
+#!/usr/bin/python3
+"""Launch pinned Camoufox with a persistent Linux identity and desktop auth."""
+import os,json,hashlib,re,subprocess
+from pathlib import Path
+runtime=Path(f'/run/user/{os.getuid()}')
+authorities=list(runtime.glob('.mutter-Xwaylandauth.*'))
+if authorities:os.environ['XAUTHORITY']=str(max(authorities,key=lambda p:p.stat().st_mtime))
+os.environ.setdefault('XDG_RUNTIME_DIR',str(runtime))
+keys=sorted((k for k in os.environ if k.startswith('CAMOU_CONFIG_')),key=lambda k:int(k.rsplit('_',1)[1]))
+raw=json.loads(os.environ.get('CAMOU_CONFIG','') or ''.join(os.environ[k] for k in keys) or '{}')
+args=os.sys.argv[1:]
+profile=None
+for i,a in enumerate(args[:-1]):
+ if a in ['-profile','--profile']:profile=Path(args[i+1]).resolve();break
+if profile is None:raise SystemExit('Camoufox persistent profile path is required')
+binary=profile.parent.parent.parent/'browsers'/'camoufox-current'/'camoufox-bin'
+identity_path=profile/'CamoufoxNative'/'persona.json'
+identity_path.parent.mkdir(mode=0o700,exist_ok=True)
+# Preserve existing explicitly configured fingerprints; complete empty MCP-created profiles.
+if identity_path.exists():identity=json.loads(identity_path.read_text())
+else:
+ seed=int.from_bytes(hashlib.sha256(str(profile).encode()).digest()[:4],'big') or 1
+ variant=seed%2
+ fonts=['DejaVu Sans','DejaVu Serif','DejaVu Sans Mono','Noto Sans','Noto Serif','Noto Color Emoji']
+ if variant:fonts+=['Liberation Sans','Liberation Serif','Liberation Mono']
+ identity={'navigator.userAgent':'Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0','navigator.platform':'Linux x86_64','navigator.oscpu':'Linux x86_64','navigator.appVersion':'5.0 (X11)','navigator.hardwareConcurrency':8 if variant else 4,'navigator.maxTouchPoints':0,'audio:seed':seed,'fonts':fonts}
+ # Pin the initial direct-network locale. A configured proxy uses its detected locale.
+ for k in ['timezone','locale:language','locale:region']:
+  if k in raw:identity[k]=raw[k]
+ identity_path.write_text(json.dumps(identity,indent=2)+'\n');identity_path.chmod(0o600)
+profile_meta=profile.parent/'profile.json'
+metadata=json.loads(profile_meta.read_text()) if profile_meta.exists() else {}
+# Mirror BrowseForge's profile/default/enforced group proxy precedence.
+groups_path=profile.parent.parent.parent/'data'/'groups.json'
+groups=json.loads(groups_path.read_text()).get('groups',[]) if groups_path.exists() else []
+group=next((g for g in groups if g.get('name','').strip()==metadata.get('group','').strip()),{})
+group_proxy=group.get('proxy')
+effective_proxy=group_proxy if group.get('proxy_mode')=='enforced' and group_proxy else metadata.get('proxy') or group_proxy
+proxied=bool(effective_proxy)
+config={**identity,**raw}
+# A recorded preset may predate the pinned browser; keep the UA version coherent.
+if 'navigator.userAgent' in config:
+ config['navigator.userAgent']=re.sub(r'(Firefox/|rv:)\d+(?:\.\d+)*',lambda m:m.group(1)+'156.0',config['navigator.userAgent'])
+if not proxied:
+ for k in ['timezone','locale:language','locale:region']:
+  if k in identity:config[k]=identity[k]
+# The supported setup is Linux: keep native fonts, platform, UA and GPU together.
+for k in ['navigator.userAgent','navigator.platform','navigator.oscpu','navigator.appVersion','navigator.hardwareConcurrency','navigator.maxTouchPoints','fonts','audio:seed']:
+ config[k]=identity[k]
+# Use real native rendering backends; this changes rendered pixels, not JS APIs.
+backends={
+ 'hardware':{},
+ 'llvmpipe':{'LIBGL_ALWAYS_SOFTWARE':'true','GALLIUM_DRIVER':'llvmpipe'},
+ 'llvmpipe-sse2':{'LIBGL_ALWAYS_SOFTWARE':'true','GALLIUM_DRIVER':'llvmpipe','GALLIUM_OVERRIDE_CPU_CAPS':'sse2'},
+ 'llvmpipe-msaa8':{'LIBGL_ALWAYS_SOFTWARE':'true','GALLIUM_DRIVER':'llvmpipe'},
+ 'softpipe':{'LIBGL_ALWAYS_SOFTWARE':'true','GALLIUM_DRIVER':'softpipe'},
+}
+rendering_path=identity_path.parent/'rendering.json'
+if not rendering_path.exists():
+ pool=['hardware','llvmpipe','llvmpipe-msaa8','softpipe']
+ backend=pool[int.from_bytes(hashlib.sha256(str(profile).encode()).digest()[:4],'big')%len(pool)]
+ rendering_path.write_text(json.dumps({'schema':1,'backend':backend},indent=2)+'\n');rendering_path.chmod(0o600)
+rendering=json.loads(rendering_path.read_text())
+backend=rendering.get('backend')
+if rendering.get('schema')!=1 or backend not in backends:raise SystemExit('Invalid pinned Camoufox rendering backend')
+# Clear inherited selection variables so hardware and software profiles stay isolated.
+for k in ['LIBGL_ALWAYS_SOFTWARE','GALLIUM_DRIVER','GALLIUM_OVERRIDE_CPU_CAPS','MESA_LOADER_DRIVER_OVERRIDE','VK_DRIVER_FILES','LP_NATIVE_VECTOR_WIDTH','GALLIUM_NOSSE','LP_FORCE_SSE2']:
+ os.environ.pop(k,None)
+os.environ.update(backends[backend])
+for k in list(config):
+ if k.startswith(('webGl:','webGl2:')):del config[k]
+# The real backend supplies vendor, renderer, limits, extensions and precision.
+# Keep the historical sampled identity on disk for rollback, without spoofing it.
+# Optional, profile-local diagnostics: compare native host attributes.
+policy_path=identity_path.parent/'native-policy.json'
+policy=json.loads(policy_path.read_text()) if policy_path.exists() else {}
+if policy:
+ if policy.get('schema')!=1 or policy.get('fonts','system') not in ['bundled','system'] or policy.get('audio','seeded') not in ['native','seeded'] or policy.get('navigator','pinned') not in ['native','pinned'] or policy.get('webrtc','disabled') not in ['disabled','proxy_only']:
+  raise SystemExit('Invalid native identity policy')
+ if policy.get('audio')=='native':config['audio:seed']=0
+ if policy.get('navigator')=='native':
+  for k in list(config):
+   if k.startswith(('screen.','window.')) or k in ['navigator.hardwareConcurrency','navigator.maxTouchPoints','navigator.appVersion','navigator.buildID','AudioContext:sampleRate','AudioContext:outputLatency','AudioContext:maxChannelCount']:
+    config.pop(k,None)
+# Native installed Linux fonts keep glyph metrics and reported availability coherent.
+if policy.get('fonts','system')=='system':config.pop('fonts',None)
+# HTTP headers and JS APIs expose the same identity.
+config['headers.User-Agent']=config['navigator.userAgent']
+language=config.get('locale:language','en');region=config.get('locale:region','US')
+config['headers.Accept-Language']=language+'-'+region+','+language+';q=0.9'
+config['navigator.language']=language+'-'+region
+# Long configurations remain chunked, matching BrowseForge's transport contract.
+for k in keys:os.environ.pop(k,None)
+os.environ.pop('CAMOU_CONFIG',None)
+encoded=json.dumps(config,separators=(',',':'),ensure_ascii=True)
+if len(encoded)<=24000:os.environ['CAMOU_CONFIG']=encoded
+else:
+ for i in range(0,len(encoded),24000):os.environ['CAMOU_CONFIG_'+str(i//24000+1)]=encoded[i:i+24000]
+platform=config.get('navigator.platform','Linux x86_64')
+os_name='windows' if platform.startswith('Win') else 'macos' if platform.startswith('Mac') else 'linux'
+os.environ['FONTCONFIG_PATH']='/etc/fonts' if policy.get('fonts','system')=='system' else str(binary.parent/'fontconfig'/os_name)
+# Replace only our managed prefs, preserving all unrelated profile preferences.
+userjs=profile/'user.js'
+start_marker='// BEGIN BROWSEFORGE CAMOUFOX MANAGED'
+end_marker='// END BROWSEFORGE CAMOUFOX MANAGED'
+previous=userjs.read_text() if userjs.exists() else ''
+previous=re.sub(re.escape(start_marker)+r'.*?'+re.escape(end_marker)+r'\n?', '', previous, flags=re.S)
+language=config.get('locale:language','en');region=config.get('locale:region','US');locale=language+'-'+region
+rtc_proxy_only=proxied and policy.get('webrtc')=='proxy_only'
+prefs={
+ 'intl.locale.requested':locale,
+ 'intl.accept_languages':locale+','+language,
+ 'privacy.fingerprintingProtection.overrides':'-CanvasRandomization,-EfficientCanvasRandomization',
+ 'media.peerconnection.enabled':not proxied or rtc_proxy_only,
+ # Native proxy-only ICE permits TURN/TCP via the proxy and blocks direct ICE.
+ 'media.peerconnection.ice.proxy_only':rtc_proxy_only,
+ 'media.peerconnection.ice.no_host':rtc_proxy_only,
+ # Disable Firefox DoH; SOCKS5 resolves destination names at the proxy.
+ 'network.trr.mode':5,
+ 'network.proxy.socks_remote_dns':True,
+ 'network.proxy.no_proxies_on':'',
+ 'network.proxy.allow_hijacking_localhost':proxied,
+ 'network.proxy.failover_direct':False,
+ 'network.dns.disablePrefetch':True,
+ 'network.dns.disableIPv6':bool(policy.get('ipv4_only',False)),
+ 'network.dns.disablePrefetchFromHTTPS':True,
+ 'network.predictor.enabled':False,
+ 'network.prefetch-next':False,
+ 'network.http.speculative-parallel-limit':0,
+ # Firefox on Linux has WebGPU disabled by default; prevent exposing a second GPU.
+ 'dom.webgpu.enabled':False,
+ 'webgl.enable-webgl2':True,
+ # Firefox persists old user.js values in prefs.js; explicitly clear old labels.
+ 'webgl.override-unmasked-renderer':'',
+ 'webgl.override-unmasked-vendor':'',
+ 'webgl.msaa-samples':8 if backend=='llvmpipe-msaa8' else 4,
+}
+block=start_marker+'\n'+''.join('user_pref('+json.dumps(k)+', '+json.dumps(v)+');\n' for k,v in prefs.items())+end_marker+'\n'
+userjs.write_text(previous.rstrip()+'\n'+block);userjs.chmod(0o600)
+os.execv(str(binary),[str(binary),*args])
